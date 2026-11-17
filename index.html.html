@@ -1,0 +1,1304 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoramento Visual de Postos • BH & Sabará (Sem API)</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS & JS (100% Gratuito, sem chave de API) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <!-- Fonte Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #0f172a;
+        }
+
+        #app-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+            background-color: #e2e8f0;
+        }
+
+        /* Fundo vetorial de segurança caso algum tile demore a carregar */
+        #map {
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            background-color: #eef2f6;
+            background-image: 
+                radial-gradient(#cbd5e1 1px, transparent 1px),
+                linear-gradient(to right, rgba(203, 213, 225, 0.35) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(203, 213, 225, 0.35) 1px, transparent 1px);
+            background-size: 40px 40px, 20px 20px, 20px 20px;
+        }
+
+        /* Pulso para Endereços Principais */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.75); opacity: 0.9; }
+            75% { transform: scale(2.2); opacity: 0; }
+            100% { transform: scale(2.2); opacity: 0; }
+        }
+
+        .main-marker-pulse {
+            position: absolute;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            animation: pulse-ring 2.2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+            top: -3px;
+            left: -3px;
+            z-index: 1;
+        }
+
+        .custom-div-icon {
+            background: transparent;
+            border: none;
+        }
+
+        /* Estilização rica do Popup Leaflet */
+        .leaflet-popup-content-wrapper {
+            border-radius: 16px !important;
+            padding: 0 !important;
+            box-shadow: 0 25px 35px -5px rgba(15, 23, 42, 0.35), 0 10px 15px -5px rgba(15, 23, 42, 0.15) !important;
+            overflow: hidden;
+            border: 2px solid #cbd5e1;
+            background: #0f172a !important;
+        }
+
+        .leaflet-popup-content {
+            margin: 0 !important;
+            width: 310px !important;
+        }
+
+        .leaflet-popup-tip {
+            background: #0f172a !important;
+        }
+
+        .leaflet-popup-close-button {
+            color: #ffffff !important;
+            background: rgba(15, 23, 42, 0.7) !important;
+            border-radius: 9999px !important;
+            width: 24px !important;
+            height: 24px !important;
+            line-height: 22px !important;
+            top: 8px !important;
+            right: 8px !important;
+            z-index: 20 !important;
+        }
+
+        /* Scrollbar personalizada */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 5px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border-radius: 9999px;
+        }
+
+        /* Modo Expandido Total na Janela (Fallback se iframe bloquear Fullscreen API) */
+        .window-expanded #sidebar {
+            transform: translateX(-100%);
+            position: fixed;
+        }
+        .window-expanded #open-sidebar-btn {
+            display: flex !important;
+        }
+
+        /* Overlay de Drag & Drop de Fotos */
+        #drop-overlay.active {
+            display: flex !important;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app-container" class="flex flex-col md:flex-row">
+    
+    <!-- Overlay de Arrastar e Soltar Fotos -->
+    <div id="drop-overlay" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md border-4 border-dashed border-amber-400 items-center justify-center p-6 pointer-events-none">
+        <div class="text-center text-white max-w-md">
+            <div class="w-20 h-20 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center mx-auto mb-4 text-3xl shadow-2xl animate-bounce">
+                <i class="fa-solid fa-images"></i>
+            </div>
+            <h2 class="text-2xl font-black">Solte suas fotos aqui!</h2>
+            <p class="text-sm text-slate-300 mt-2">Todas as fotos serão vinculadas automaticamente aos respectivos postos no mapa e salvas no navegador.</p>
+        </div>
+    </div>
+
+    <!-- Barra Lateral de Controle e Proximidade -->
+    <aside id="sidebar" class="fixed md:relative z-20 top-0 left-0 h-full w-80 sm:w-[365px] bg-white/95 backdrop-blur-md shadow-2xl border-r border-slate-200 flex flex-col transition-transform duration-300 ease-in-out">
+        
+        <!-- Cabeçalho -->
+        <div class="p-4 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-amber-400 flex items-center justify-center text-slate-950 font-black shadow-lg">
+                    <i class="fa-solid fa-gas-pump text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="font-extrabold text-sm sm:text-base leading-tight tracking-tight">Mapa Visual de Postos</h1>
+                    <p class="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        4 Bases Principais • Sem API
+                    </p>
+                </div>
+            </div>
+            <button onclick="toggleSidebar(false)" class="p-2 rounded-lg hover:bg-slate-700 text-slate-300 transition cursor-pointer" title="Recolher painel para ampliar mapa">
+                <i class="fa-solid fa-angles-left text-base"></i>
+            </button>
+        </div>
+
+        <!-- Botão de Upload para Vincular e Salvar as Fotos Originais -->
+        <div class="p-3 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-200/90">
+            <label for="photo-uploader" class="flex items-center justify-between gap-2 p-2.5 bg-white hover:bg-amber-50/70 border-2 border-dashed border-amber-500 rounded-xl cursor-pointer transition shadow-sm group">
+                <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-9 h-9 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center shrink-0 group-hover:scale-105 transition shadow">
+                        <i class="fa-solid fa-camera-retro text-base"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <span class="block text-xs font-extrabold text-slate-900 truncate">Carregar Fotos dos Postos</span>
+                        <span id="upload-status" class="block text-[11px] text-slate-600 truncate">Selecione ou arraste suas fotos</span>
+                    </div>
+                </div>
+                <span class="text-xs font-extrabold bg-slate-900 group-hover:bg-slate-800 text-amber-400 px-2.5 py-1.5 rounded-lg shrink-0 transition">
+                    Anexar
+                </span>
+                <input type="file" id="photo-uploader" multiple accept="image/*" class="hidden" onchange="handlePhotoUpload(event)">
+            </label>
+        </div>
+
+        <!-- Filtros por Base Principal -->
+        <div class="p-3 border-b border-slate-200 bg-slate-50">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">Agrupar por Base Principal</span>
+                <button onclick="resetMapView()" class="text-[11px] text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 cursor-pointer">
+                    <i class="fa-solid fa-maximize"></i> Ver Todos
+                </button>
+            </div>
+            <div class="grid grid-cols-2 gap-1.5">
+                <button onclick="filterGroup('all')" data-group="all" class="filter-btn col-span-2 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-white shadow-sm transition text-left flex items-center justify-between cursor-pointer">
+                    <span>Todos os Postos (4 Bases + Fotos)</span>
+                    <span class="bg-white/20 px-1.5 py-0.5 rounded text-[10px]">14</span>
+                </button>
+                <button onclick="filterGroup('base-aguia-1')" data-group="base-aguia-1" class="filter-btn px-2 py-1.5 rounded-lg text-[11px] font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-emerald-50 transition text-left flex items-center gap-1.5 cursor-pointer">
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0"></span>
+                    <span class="truncate">Águia I (1062)</span>
+                </button>
+                <button onclick="filterGroup('base-aguia-2')" data-group="base-aguia-2" class="filter-btn px-2 py-1.5 rounded-lg text-[11px] font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-teal-50 transition text-left flex items-center gap-1.5 cursor-pointer">
+                    <span class="w-2.5 h-2.5 rounded-full bg-teal-600 shrink-0"></span>
+                    <span class="truncate">Águia II - Allgas</span>
+                </button>
+                <button onclick="filterGroup('base-mineiro')" data-group="base-mineiro" class="filter-btn px-2 py-1.5 rounded-lg text-[11px] font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-blue-50 transition text-left flex items-center gap-1.5 cursor-pointer">
+                    <span class="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0"></span>
+                    <span class="truncate">Posto Mineiro</span>
+                </button>
+                <button onclick="filterGroup('base-verona')" data-group="base-verona" class="filter-btn px-2 py-1.5 rounded-lg text-[11px] font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-purple-50 transition text-left flex items-center gap-1.5 cursor-pointer">
+                    <span class="w-2.5 h-2.5 rounded-full bg-purple-500 shrink-0"></span>
+                    <span class="truncate">Posto Verona</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Lista Agrupada por Endereço Principal -->
+        <div id="locations-list" class="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+            <!-- Renderizado dinamicamente -->
+        </div>
+
+        <!-- Rodapé Informativo -->
+        <div class="px-3 py-2 bg-slate-900 text-slate-300 border-t border-slate-800 text-[11px] flex items-center justify-between">
+            <span><i class="fa-solid fa-computer-mouse text-amber-400 mr-1"></i>Passe o mouse ou clique para ver a foto</span>
+            <button id="clear-photos-btn" onclick="clearSavedPhotos()" class="hidden text-rose-400 hover:text-rose-300 font-bold underline cursor-pointer" title="Remover fotos salvas no navegador">
+                Limpar fotos
+            </button>
+        </div>
+    </aside>
+
+    <!-- Área Principal do Mapa -->
+    <main class="flex-1 relative h-full w-full">
+        
+        <!-- Botão para Reabrir Barra Lateral -->
+        <button id="open-sidebar-btn" onclick="toggleSidebar(true)" class="hidden absolute top-4 left-4 z-10 bg-white/95 backdrop-blur-md hover:bg-slate-50 text-slate-900 font-bold px-3.5 py-2.5 rounded-xl shadow-xl border border-slate-300 items-center gap-2 transition cursor-pointer">
+            <i class="fa-solid fa-bars text-amber-500"></i>
+            <span class="text-xs sm:text-sm">Lista de Postos</span>
+        </button>
+
+        <!-- Barra Superior Direita: Seletor de Camada do Mapa + Tela Cheia -->
+        <div class="absolute top-4 right-4 z-10 flex flex-wrap items-center justify-end gap-2">
+            
+            <!-- Seletor de Camada de Mapa Gratuito (Sem API) -->
+            <div class="bg-white/95 backdrop-blur-md p-1 rounded-xl shadow-xl border border-slate-300 flex items-center gap-1 text-xs">
+                <button onclick="switchBaseLayer('osm')" id="layer-btn-osm" class="layer-btn px-2.5 py-1.5 rounded-lg font-bold bg-slate-900 text-white transition cursor-pointer" title="Mapa de Ruas OpenStreetMap">
+                    <i class="fa-solid fa-map mr-1"></i>Ruas
+                </button>
+                <button onclick="switchBaseLayer('carto')" id="layer-btn-carto" class="layer-btn px-2.5 py-1.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer" title="Mapa Claro CartoDB Positron">
+                    <i class="fa-solid fa-layer-group mr-1"></i>Claro
+                </button>
+                <button onclick="switchBaseLayer('esri')" id="layer-btn-esri" class="layer-btn px-2.5 py-1.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer" title="Imagem de Satélite Esri">
+                    <i class="fa-solid fa-satellite mr-1"></i>Satélite
+                </button>
+            </div>
+
+            <!-- Botão de Tela Cheia Bem Visível -->
+            <button id="fullscreen-btn" onclick="toggleFullScreen()" class="bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold px-4 py-2.5 rounded-xl shadow-xl border border-amber-500 flex items-center gap-2 transition transform active:scale-95 cursor-pointer">
+                <i id="fullscreen-icon" class="fa-solid fa-expand text-slate-900"></i>
+                <span id="fullscreen-text" class="text-xs sm:text-sm">Tela Cheia</span>
+            </button>
+        </div>
+
+        <!-- Legenda Flutuante Inferior -->
+        <div class="absolute bottom-4 left-4 z-10 bg-white/95 backdrop-blur-md px-3.5 py-2 rounded-xl shadow-lg border border-slate-200 text-[11px] flex flex-wrap items-center gap-3 max-w-[92vw]">
+            <div class="flex items-center gap-1.5 font-extrabold text-slate-900">
+                <span class="w-4 h-4 rounded-full bg-slate-900 border-2 border-amber-400 text-amber-400 flex items-center justify-center text-[8px]">
+                    <i class="fa-solid fa-star"></i>
+                </span>
+                <span>Endereço Principal (4)</span>
+            </div>
+            <span class="text-slate-300 hidden sm:inline">|</span>
+            <div class="flex items-center gap-1.5 text-slate-700 font-medium">
+                <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
+                <span>Águia I</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-slate-700 font-medium">
+                <span class="w-3 h-3 rounded-full bg-teal-600"></span>
+                <span>Águia II</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-slate-700 font-medium">
+                <span class="w-3 h-3 rounded-full bg-blue-500"></span>
+                <span>Mineiro</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-slate-700 font-medium">
+                <span class="w-3 h-3 rounded-full bg-purple-500"></span>
+                <span>Verona</span>
+            </div>
+        </div>
+
+        <!-- Container do Mapa Leaflet -->
+        <div id="map"></div>
+    </main>
+
+    <!-- Modal Lightbox em Tela Cheia para Foto Ampliada -->
+    <div id="photo-modal" class="fixed inset-0 z-50 bg-slate-950/92 backdrop-blur-md hidden items-center justify-center p-2 sm:p-5" onclick="closePhotoModal(event)">
+        <div class="bg-slate-900 rounded-2xl max-w-4xl w-full overflow-hidden shadow-2xl border border-slate-700 flex flex-col max-h-[95vh]" onclick="event.stopPropagation()">
+            <div class="px-4 py-3 bg-slate-950 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
+                <div class="min-w-0 pr-3">
+                    <div class="flex items-center gap-2">
+                        <span id="modal-badge" class="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-400 text-slate-950">POSTO</span>
+                        <h3 id="modal-title" class="font-bold text-sm sm:text-base truncate">Nome do Posto</h3>
+                    </div>
+                    <p id="modal-subtitle" class="text-[11px] text-slate-400 mt-0.5 truncate">Endereço</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button onclick="triggerSinglePhotoUpload()" class="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer" title="Substituir ou anexar foto para este posto">
+                        <i class="fa-solid fa-camera"></i>
+                        <span class="hidden sm:inline">Trocar / Anexar Foto</span>
+                    </button>
+                    <button onclick="closePhotoModal()" class="w-9 h-9 rounded-xl bg-slate-800 hover:bg-red-600 text-white flex items-center justify-center transition cursor-pointer" title="Fechar visualização">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+            </div>
+            <div id="modal-body" class="p-3 sm:p-5 bg-slate-950 flex flex-col items-center justify-center overflow-y-auto flex-1">
+                <!-- Foto em tela cheia -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Input oculto para anexar foto específica a um posto clicado -->
+    <input type="file" id="single-photo-uploader" accept="image/*" class="hidden" onchange="handleSinglePhotoUpload(event)">
+
+</div>
+
+<script>
+    // =========================================================================
+    // 1. APENAS OS 4 ENDEREÇOS PRINCIPAIS (BASES DE REFERÊNCIA)
+    // =========================================================================
+    const mainPoints = [
+        {
+            id: 'main-aguia-1',
+            group: 'base-aguia-1',
+            name: 'Posto Águia I',
+            address: 'Av. Saramenha, 1062 - Guarani, Belo Horizonte - MG, 31840-220',
+            lat: -19.8458,
+            lng: -43.9308,
+            color: '#10b981',
+            brand: 'Rede Águia • Principal',
+            photoMatchKeys: ['posto águia i', 'posto aguia i', 'saramenha, 1062'],
+            photoFileName: 'Posto Águia I_Av. Saramenha, 1062 - Guarani, Belo Horizonte - MG, 31840-220.jpeg',
+            signTheme: { bg: '#f8fafc', border: '#dc2626', headerBg: '#dc2626', headerText: '#ffffff', title: 'LAVA RÁPIDO ÁGUIA' },
+            prices: [
+                { fuel: 'Etanol Comum', cash: 'R$ 4,38', credit: 'R$ 4,49', color: '#16a34a' },
+                { fuel: 'Gasolina Comum', cash: 'R$ 6,40', credit: 'R$ 6,49', color: '#dc2626' },
+                { fuel: 'Gasolina Aditivada', cash: 'R$ 6,80', credit: 'R$ 6,89', color: '#b91c1c' },
+                { fuel: 'GNV', cash: 'R$ 4,99', credit: '-', color: '#334155' }
+            ]
+        },
+        {
+            id: 'main-aguia-2',
+            group: 'base-aguia-2',
+            name: 'Águia II - Allgas',
+            address: 'Av. Saramenha, 1632 - Guarani, Belo Horizonte - MG',
+            lat: -19.8422,
+            lng: -43.9278,
+            color: '#0d9488',
+            brand: 'Rede Águia / Allgas • Principal',
+            photoMatchKeys: ['aguia ii', 'águia ii', '1632'],
+            photoFileName: null,
+            signTheme: { bg: '#0f766e', border: '#facc15', headerBg: '#115e59', headerText: '#facc15', title: 'ÁGUIA II - ALLGAS (BASE PRINCIPAL)' },
+            prices: []
+        },
+        {
+            id: 'main-mineiro',
+            group: 'base-mineiro',
+            name: 'Posto Mineiro',
+            address: 'R. Maria Manoela Braz, 465 - Heliópolis, Belo Horizonte - MG, 31741-460',
+            lat: -19.8355,
+            lng: -43.9365,
+            color: '#3b82f6',
+            brand: 'Rede Águia • Principal',
+            photoMatchKeys: ['posto mineiro', 'maria manoela braz'],
+            photoFileName: 'Posto mineiro_R. Maria Manoela Braz, 465 - Heliópolis, Belo Horizonte - MG, 31741-460.jpeg',
+            signTheme: { bg: '#6d4c41', border: '#3e2723', headerBg: '#4e342e', headerText: '#ffffff', title: 'REDE ÁGUIA • POSTO MINEIRO' },
+            prices: [
+                { fuel: 'Etanol Comum', cash: 'R$ 4,30', credit: 'R$ 4,49', color: '#f59e0b' },
+                { fuel: 'Gasolina Comum', cash: 'R$ 6,35', credit: 'R$ 6,49', color: '#f59e0b' },
+                { fuel: 'Gasolina Aditivada', cash: 'R$ 6,75', credit: 'R$ 6,89', color: '#f59e0b' },
+                { fuel: 'Diesel S10', cash: 'R$ 6,87', credit: 'R$ 6,94', color: '#f59e0b' }
+            ]
+        },
+        {
+            id: 'main-verona',
+            group: 'base-verona',
+            name: 'Posto Verona',
+            address: 'Rod. Anel Rodoviário Celso Mello Azevedo, 23759 - Dom Silvério, BH - MG',
+            lat: -19.8742,
+            lng: -43.9145,
+            color: '#a855f7',
+            brand: 'Anel Rodoviário • Principal',
+            photoMatchKeys: ['verona', '23759'],
+            photoFileName: null,
+            signTheme: { bg: '#581c87', border: '#facc15', headerBg: '#3b0764', headerText: '#facc15', title: 'POSTO VERONA (BASE PRINCIPAL)' },
+            prices: []
+        }
+    ];
+
+    // =========================================================================
+    // 2. DEMAIS POSTOS (INCLUINDO VIZINHO DO ÁGUIA II E POSTO WAP COMO MONITORADOS)
+    // =========================================================================
+    const rawPhotoLocations = [
+        {
+            id: 'foto-vizinho-aguia-2',
+            name: 'Posto Vizinho do Águia II',
+            address: 'Av. Saramenha, 1660 - Guarani, Belo Horizonte - MG, 31840-220',
+            lat: -19.8418,
+            lng: -43.9275,
+            brand: 'Concorrente Vizinho',
+            photoMatchKeys: ['vizinho do águia', 'vizinho do aguia', '1660'],
+            photoFileName: 'Posto Vizinho do Águia II.jpeg',
+            signTheme: { bg: '#0f766e', border: '#99f6e4', headerBg: '#134e4a', headerText: '#ffffff', title: 'POSTO VIZINHO DO ÁGUIA II' },
+            prices: []
+        },
+        {
+            id: 'foto-wap',
+            name: 'Posto Wap da Cristiano Machado',
+            address: 'Av. Cristiano Machado (Trecho Guarani / Norte), BH - MG',
+            lat: -19.8525,
+            lng: -43.9345,
+            brand: 'Av. Cristiano Machado',
+            photoMatchKeys: ['posto wap', 'wap da cristiano'],
+            photoFileName: 'Posto wap da Cristiano Machado.jpeg',
+            signTheme: { bg: '#047857', border: '#a7f3d0', headerBg: '#064e3b', headerText: '#ffffff', title: 'POSTO WAP • CRISTIANO MACHADO' },
+            prices: []
+        },
+        {
+            id: 'foto-floramar',
+            name: 'Posto Floramar da Cristiano Machado',
+            address: 'Av. Cristiano Machado (Altura Floramar), BH - MG',
+            lat: -19.8395,
+            lng: -43.9260,
+            brand: 'Petrobras (BR)',
+            photoMatchKeys: ['floramar'],
+            photoFileName: 'Posto floramar da Cristiano Machado.jpeg',
+            signTheme: { bg: '#15803d', border: '#facc15', headerBg: '#b91c1c', headerText: '#ffffff', title: 'POSTO FLORAMAR • BR' },
+            prices: [
+                { fuel: 'Etanol Comum', cash: 'R$ 4,59', credit: 'R$ 4,59', color: '#ffffff' },
+                { fuel: 'Gasolina Comum', cash: 'R$ 6,42', credit: 'R$ 6,42', color: '#ffffff' }
+            ]
+        },
+        {
+            id: 'foto-estacao-bh',
+            name: 'Posto Estação BH',
+            address: 'Av. Cristiano Machado, 10025 - Heliópolis, BH - MG',
+            lat: -19.8340,
+            lng: -43.9398,
+            brand: 'Estação BH',
+            photoMatchKeys: ['estação bh', 'estacao bh', '10025'],
+            photoFileName: 'Posto estação BH_Av. Cristiano Machado, 10025 - Heliópolis, Belo Horizonte - MG, 31741-465.jpeg',
+            signTheme: { bg: '#facc15', border: '#047857', headerBg: '#047857', headerText: '#ffffff', title: 'ESTAÇÃO BH' },
+            prices: [
+                { fuel: 'Etanol', cash: 'R$ 4,38', credit: '-', color: '#b91c1c' },
+                { fuel: 'Gasolina', cash: 'R$ 6,28', credit: '-', color: '#b91c1c' }
+            ]
+        },
+        {
+            id: 'foto-bretas',
+            name: 'Posto JBretas da Cristiano Machado',
+            address: 'Av. Cristiano Machado (Trecho Norte), BH - MG',
+            lat: -19.8475,
+            lng: -43.9240,
+            brand: 'Ipiranga / JBretas',
+            photoMatchKeys: ['bretas'],
+            photoFileName: 'Posto bretas da Cristiano Machado.jpeg',
+            signTheme: { bg: '#312e81', border: '#facc15', headerBg: '#1e1b4b', headerText: '#facc15', title: 'JBRETAS POSTOS • IPIRANGA' },
+            prices: [
+                { fuel: 'Etanol Original', cash: 'R$ 4,69', credit: 'R$ 4,69', color: '#4ade80' },
+                { fuel: 'Gasolina Original', cash: 'R$ 6,49', credit: 'R$ 6,49', color: '#facc15' },
+                { fuel: 'Gasolina Aditivada', cash: 'R$ 6,79', credit: 'R$ 6,79', color: '#fb923c' }
+            ]
+        },
+        {
+            id: 'foto-sao-gabriel-1',
+            name: 'Posto Novo São Gabriel (Banner Azul/Vermelho)',
+            address: 'Região São Gabriel / Anel Rodoviário, BH - MG',
+            lat: -19.8635,
+            lng: -43.9210,
+            brand: 'Rede Águia',
+            photoMatchKeys: ['são gabriel (verificar) (2)', 'sao gabriel (verificar) (2)'],
+            photoFileName: 'Posto novo São Gabriel (verificar) (2).jpeg',
+            signTheme: { bg: '#1d4ed8', border: '#dc2626', headerBg: '#dc2626', headerText: '#ffffff', title: 'NOVO SÃO GABRIEL • PIX / CRÉDITO' },
+            prices: [
+                { fuel: 'Gasolina Comum', cash: 'R$ 6,39', credit: 'R$ 6,69', color: '#ffffff' },
+                { fuel: 'Etanol Comum', cash: 'R$ 4,29', credit: 'R$ 4,59', color: '#fde047' }
+            ]
+        },
+        {
+            id: 'foto-sao-gabriel-2',
+            name: 'Posto Novo São Gabriel (NS Norte Sul Ipiranga)',
+            address: 'Trecho Anel Rodoviário / São Gabriel, BH - MG',
+            lat: -19.8665,
+            lng: -43.9195,
+            brand: 'Ipiranga / Rede Norte Sul',
+            photoMatchKeys: ['novo são gabriel (verificar).jpeg', 'novo sao gabriel (verificar).jpeg', 'novo são gabriel (verificar)_2.jpeg'],
+            photoFileName: 'Posto novo São Gabriel (verificar).jpeg',
+            signTheme: { bg: '#f8fafc', border: '#0284c7', headerBg: '#0369a1', headerText: '#ffffff', title: 'NS NORTE SUL • IPIRANGA' },
+            prices: [
+                { fuel: 'Diesel Comum', cash: 'R$ 6,49', credit: '-', color: '#0369a1' },
+                { fuel: 'Diesel S10', cash: 'R$ 6,79', credit: '-', color: '#1e3a8a' },
+                { fuel: 'Gasolina Original', cash: 'R$ 6,49', credit: 'R$ 6,69', color: '#d97706' },
+                { fuel: 'Gasolina Aditivada', cash: 'R$ 6,89', credit: '-', color: '#dc2626' },
+                { fuel: 'Etanol', cash: 'R$ 4,49', credit: 'R$ 4,69', color: '#16a34a' }
+            ]
+        },
+        {
+            id: 'foto-curiango',
+            name: 'Posto Curiango Shell',
+            address: 'Anel Rodoviário Celso Mello Azevedo, 25771 - Nazaré, BH - MG',
+            lat: -19.8562,
+            lng: -43.9035,
+            brand: 'Shell',
+            photoMatchKeys: ['curiango'],
+            photoFileName: 'Posto curiango_Anel Rodoviário Celso Mello Azevedo, 25771.jpeg',
+            signTheme: { bg: '#ffffff', border: '#dc2626', headerBg: '#dc2626', headerText: '#facc15', title: 'POSTO CURIANGO • SHELL' },
+            prices: [
+                { fuel: 'Diesel Comum', cash: 'R$ 6,39', credit: '-', color: '#dc2626' },
+                { fuel: 'Diesel S10', cash: 'R$ 6,89', credit: '-', color: '#dc2626' },
+                { fuel: 'Gasolina Comum', cash: 'R$ 6,49', credit: '-', color: '#dc2626' },
+                { fuel: 'Gasolina Aditivada', cash: 'R$ 6,89', credit: '-', color: '#dc2626' },
+                { fuel: 'Etanol Comum', cash: 'R$ 4,49', credit: '-', color: '#dc2626' }
+            ]
+        },
+        {
+            id: 'foto-beija-flor',
+            name: 'Posto Beija-Flor Ipiranga',
+            address: 'Anel Rodoviário Celso Mello Azevedo, 28500 - Jardim Vitória, BH - MG',
+            lat: -19.8458,
+            lng: -43.8812,
+            brand: 'Ipiranga / Aguazul',
+            photoMatchKeys: ['beija flor'],
+            photoFileName: 'Posto beija flor_Anel Rodoviário Celso Mello Azevedo, 28500.jpeg',
+            signTheme: { bg: '#f1f5f9', border: '#1e3a8a', headerBg: '#1e3a8a', headerText: '#ffffff', title: 'POSTO BEIJA-FLOR • IPIRANGA' },
+            prices: [
+                { fuel: 'Diesel S500', cash: 'R$ 6,49', credit: 'R$ 6,49', color: '#0284c7' },
+                { fuel: 'Diesel S10 Aditivado', cash: 'R$ 6,79', credit: 'R$ 6,79', color: '#1e3a8a' },
+                { fuel: 'Gasolina Original', cash: 'R$ 6,49', credit: 'R$ 6,49', color: '#ca8a04' },
+                { fuel: 'Gasolina Aditivada', cash: 'R$ 6,69', credit: 'R$ 6,69', color: '#ea580c' },
+                { fuel: 'Etanol Original', cash: 'R$ 4,49', credit: 'R$ 4,49', color: '#16a34a' }
+            ]
+        },
+        {
+            id: 'foto-universal',
+            name: 'Posto Universal',
+            address: 'Rodovia BR-381, Rua Onze, 5 - Borges, Sabará - MG',
+            lat: -19.8415,
+            lng: -43.8520,
+            brand: 'BR-381 Sabará',
+            photoMatchKeys: ['universal'],
+            photoFileName: 'Posto universal_Rodovia Br 381 Rua Onze, 5 - Borges, Sabará.jpeg',
+            signTheme: { bg: '#64748b', border: '#334155', headerBg: '#334155', headerText: '#ffffff', title: 'POSTO UNIVERSAL • BR-381' },
+            prices: [
+                { fuel: 'Diesel Comum', cash: 'R$ 6,49', credit: '-', color: '#e0f2fe' },
+                { fuel: 'Diesel S10', cash: 'R$ 6,79', credit: '-', color: '#bae6fd' },
+                { fuel: 'Etanol', cash: 'R$ 4,39', credit: '-', color: '#ffffff' },
+                { fuel: 'Gasolina Original', cash: 'R$ 6,39', credit: '-', color: '#fef08a' }
+            ]
+        }
+    ];
+
+    // Cálculo automático da distância Haversine para vincular cada foto ao seu Endereço Principal mais próximo (entre os 4)
+    function calcDistanceKm(lat1, lon1, lat2, lon2) {
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon/2) * Math.sin(dLon/2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    const photoLocations = rawPhotoLocations.map(loc => {
+        let nearest = mainPoints[0];
+        let minDist = Infinity;
+
+        mainPoints.forEach(mp => {
+            const d = calcDistanceKm(loc.lat, loc.lng, mp.lat, mp.lng);
+            if (d < minDist) {
+                minDist = d;
+                nearest = mp;
+            }
+        });
+
+        const formattedDist = minDist < 1
+            ? `${Math.round(minDist * 1000)} m`
+            : `${minDist.toFixed(2).replace('.', ',')} km`;
+
+        return {
+            ...loc,
+            group: nearest.group,
+            nearestMainId: nearest.id,
+            nearestMainName: nearest.name,
+            distanceKm: formattedDist,
+            rawDistance: minDist,
+            color: nearest.color
+        };
+    });
+
+    // =========================================================================
+    // 3. PERSISTÊNCIA DE FOTOS NO INDEXEDDB DO NAVEGADOR
+    // =========================================================================
+    const DB_NAME = 'PostosMapaFotosDB';
+    const STORE_NAME = 'fotos';
+    let savedPhotosMap = {}; // { postId: dataUrl }
+    let targetUploadPostId = null;
+
+    function openPhotosDB() {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open(DB_NAME, 1);
+            req.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains(STORE_NAME)) {
+                    db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+    }
+
+    async function savePhotoToDB(postId, dataUrl, fileName) {
+        try {
+            const db = await openPhotosDB();
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            tx.objectStore(STORE_NAME).put({ id: postId, dataUrl, fileName });
+            savedPhotosMap[postId] = dataUrl;
+            updateUploadStatusUI();
+        } catch (err) {
+            savedPhotosMap[postId] = dataUrl;
+            updateUploadStatusUI();
+        }
+    }
+
+    async function loadPhotosFromDB() {
+        try {
+            const db = await openPhotosDB();
+            return new Promise((resolve) => {
+                const tx = db.transaction(STORE_NAME, 'readonly');
+                const req = tx.objectStore(STORE_NAME).getAll();
+                req.onsuccess = () => {
+                    (req.result || []).forEach(item => {
+                        savedPhotosMap[item.id] = item.dataUrl;
+                    });
+                    updateUploadStatusUI();
+                    resolve();
+                };
+                req.onerror = () => resolve();
+            });
+        } catch (err) {
+            return Promise.resolve();
+        }
+    }
+
+    async function clearSavedPhotos() {
+        savedPhotosMap = {};
+        try {
+            const db = await openPhotosDB();
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            tx.objectStore(STORE_NAME).clear();
+        } catch (e) {}
+        updateUploadStatusUI();
+        renderSidebarList(activeFilter);
+        map.closePopup();
+    }
+
+    function updateUploadStatusUI() {
+        const count = Object.keys(savedPhotosMap).length;
+        const statusEl = document.getElementById('upload-status');
+        const clearBtn = document.getElementById('clear-photos-btn');
+
+        if (count > 0) {
+            statusEl.textContent = `${count} foto(s) salva(s) — clique nos pinos!`;
+            statusEl.classList.remove('text-slate-600');
+            statusEl.classList.add('text-emerald-700', 'font-bold');
+            clearBtn.classList.remove('hidden');
+        } else {
+            statusEl.textContent = 'Selecione ou arraste suas fotos';
+            statusEl.classList.add('text-slate-600');
+            statusEl.classList.remove('text-emerald-700', 'font-bold');
+            clearBtn.classList.add('hidden');
+        }
+    }
+
+    // Normaliza texto removendo acentos e sufixos repetidos (_2) para match exato
+    function normalizeText(str) {
+        return (str || '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/_2(?=\.[a-z0-9]+$)/i, '');
+    }
+
+    function matchFileToPost(fileName) {
+        const norm = normalizeText(fileName);
+        const allItems = [...mainPoints, ...photoLocations];
+
+        // Diferenciação específica das duas fotos do Novo São Gabriel
+        if (norm.includes('sao gabriel')) {
+            if (norm.includes('(2)')) {
+                return allItems.find(i => i.id === 'foto-sao-gabriel-1');
+            }
+            return allItems.find(i => i.id === 'foto-sao-gabriel-2');
+        }
+
+        for (const item of allItems) {
+            if (!item.photoMatchKeys) continue;
+            for (const key of item.photoMatchKeys) {
+                if (norm.includes(normalizeText(key))) {
+                    return item;
+                }
+            }
+        }
+        return null;
+    }
+
+    function fileToDataURL(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    async function processUploadedFiles(fileList) {
+        if (!fileList || fileList.length === 0) return;
+
+        for (const file of fileList) {
+            if (!file.type.startsWith('image/')) continue;
+            const dataUrl = await fileToDataURL(file);
+            const matched = matchFileToPost(file.name);
+            if (matched) {
+                await savePhotoToDB(matched.id, dataUrl, file.name);
+            }
+        }
+
+        renderSidebarList(activeFilter);
+        // Se algum popup estiver aberto, reabre atualizado com a foto
+        Object.values(markersRegistry).forEach(entry => {
+            if (entry.marker.isPopupOpen()) {
+                entry.marker.setPopupContent(generatePopupHTML(entry.data, entry.isMain));
+            }
+        });
+    }
+
+    // =========================================================================
+    // 4. INICIALIZAÇÃO DO MAPA LEAFLET 100% SEM API KEY
+    // =========================================================================
+    const initialCenter = [-19.8520, -43.9120];
+    const initialZoom = 13;
+
+    const map = L.map('map', {
+        center: initialCenter,
+        zoom: initialZoom,
+        zoomControl: false
+    });
+
+    const baseLayers = {
+        osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19
+        }),
+        carto: L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO',
+            subdomains: 'abcd',
+            maxZoom: 20
+        }),
+        esri: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri',
+            maxZoom: 19
+        })
+    };
+
+    let currentBaseLayer = baseLayers.osm.addTo(map);
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    const layersByGroup = {
+        'base-aguia-1': L.layerGroup().addTo(map),
+        'base-aguia-2': L.layerGroup().addTo(map),
+        'base-mineiro': L.layerGroup().addTo(map),
+        'base-verona': L.layerGroup().addTo(map)
+    };
+
+    const markersRegistry = {};
+    let activeFilter = 'all';
+
+    function switchBaseLayer(layerKey) {
+        if (!baseLayers[layerKey]) return;
+        map.removeLayer(currentBaseLayer);
+        currentBaseLayer = baseLayers[layerKey].addTo(map);
+
+        document.querySelectorAll('.layer-btn').forEach(btn => {
+            btn.classList.remove('bg-slate-900', 'text-white', 'font-bold');
+            btn.classList.add('text-slate-600', 'font-semibold');
+        });
+        const activeBtn = document.getElementById(`layer-btn-${layerKey}`);
+        if (activeBtn) {
+            activeBtn.classList.add('bg-slate-900', 'text-white', 'font-bold');
+            activeBtn.classList.remove('text-slate-600', 'font-semibold');
+        }
+    }
+
+    // =========================================================================
+    // 5. POPUP FOCO TOTAL NA FOTO (SEM BLOCOS DE TEXTO ESCRITO)
+    // =========================================================================
+    function generatePopupHTML(item, isMain) {
+        const realImageUrl = savedPhotosMap[item.id] || null;
+        const badgeText = isMain ? '★ PRINCIPAL' : `PROX: ${item.distanceKm}`;
+        const badgeClass = isMain ? 'bg-amber-400 text-slate-950' : 'bg-slate-900/90 text-white border border-white/20';
+
+        // Quando a foto real está vinculada: exibe a FOTO EM DESTAQUE ocupando o card inteiro
+        if (realImageUrl) {
+            return `
+                <div onclick="openPhotoModal('${item.id}')" class="relative w-full h-64 bg-black cursor-pointer group overflow-hidden select-none">
+                    <img src="${realImageUrl}" alt="${item.name}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300">
+                    
+                    <!-- Selo discreto no topo -->
+                    <div class="absolute top-2.5 left-2.5 flex items-center gap-1.5">
+                        <span class="text-[10px] font-black px-2 py-0.5 rounded-full shadow ${badgeClass}">${badgeText}</span>
+                    </div>
+
+                    <!-- Legenda mínima sobreposta no rodapé da foto -->
+                    <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/65 to-transparent p-3 pt-8 flex items-end justify-between gap-2">
+                        <div class="min-w-0">
+                            <h3 class="text-white font-extrabold text-sm leading-tight truncate">${item.name}</h3>
+                            ${!isMain ? `<p class="text-[10px] text-amber-300 font-semibold truncate">Ref: ${item.nearestMainName}</p>` : ''}
+                        </div>
+                        <span class="bg-amber-400 text-slate-950 text-[10px] font-black px-2 py-1 rounded-lg shrink-0 shadow">
+                            <i class="fa-solid fa-expand"></i>
+                        </span>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Quando o arquivo de foto ainda não foi selecionado: exibe cartão visual da placa + botão direto para carregar foto
+        const theme = item.signTheme || { bg: '#1e293b', border: '#475569', headerBg: '#0f172a', headerText: '#f8fafc', title: item.name };
+        const pricesRows = (item.prices && item.prices.length > 0)
+            ? item.prices.map(p => `
+                <div class="flex items-center justify-between px-2.5 py-1 rounded bg-black/25 border border-white/10">
+                    <span class="text-[11px] font-bold" style="color: ${p.color};">${p.fuel}</span>
+                    <span class="font-mono font-black text-xs px-1.5 py-0.5 rounded bg-slate-950 text-white">${p.cash.replace('R$ ', '')}</span>
+                </div>
+            `).join('')
+            : `<div class="py-4 text-center text-xs font-bold text-white/90">${item.address}</div>`;
+
+        return `
+            <div class="relative w-full overflow-hidden select-none" style="background-color: ${theme.bg};">
+                <div class="px-3 py-2 flex items-center justify-between pr-9" style="background-color: ${theme.headerBg}; color: ${theme.headerText};">
+                    <span class="text-[11px] font-black truncate">${item.name}</span>
+                    <span class="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-black/30 shrink-0">${badgeText}</span>
+                </div>
+
+                <div class="p-3 space-y-1.5">
+                    ${pricesRows}
+                </div>
+
+                <!-- Ação direta para carregar a foto real -->
+                <div class="p-2.5 bg-slate-950/90 border-t border-white/10 flex items-center justify-between gap-2">
+                    <button onclick="openPhotoModal('${item.id}')" class="flex-1 py-1.5 px-2.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 text-[11px] font-black flex items-center justify-center gap-1.5 transition cursor-pointer">
+                        <i class="fa-solid fa-camera"></i>
+                        <span>Anexar Foto Deste Posto</span>
+                    </button>
+                    <button onclick="document.getElementById('photo-uploader').click()" class="py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-bold transition cursor-pointer" title="Carregar todas as fotos de uma vez">
+                        Todas
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    // =========================================================================
+    // 6. RENDERIZAÇÃO DOS MARCADORES E LINHAS DE PROXIMIDADE
+    // =========================================================================
+    function renderMapElements() {
+        Object.values(layersByGroup).forEach(layer => layer.clearLayers());
+
+        // 1. Os 4 Endereços Principais (Estrela Dourada com Pulso)
+        mainPoints.forEach(point => {
+            const iconHtml = `
+                <div class="relative flex items-center justify-center w-9 h-9">
+                    <div class="main-marker-pulse" style="background: ${point.color}88;"></div>
+                    <div class="relative z-10 w-8 h-8 rounded-full bg-slate-900 border-2 border-amber-400 text-amber-400 flex items-center justify-center shadow-xl transform hover:scale-115 transition">
+                        <i class="fa-solid fa-star text-xs"></i>
+                    </div>
+                </div>
+            `;
+
+            const customIcon = L.divIcon({
+                html: iconHtml,
+                className: 'custom-div-icon',
+                iconSize: [36, 36],
+                iconAnchor: [18, 18],
+                popupAnchor: [0, -16]
+            });
+
+            const marker = L.marker([point.lat, point.lng], { icon: customIcon, zIndexOffset: 1000 });
+            marker.bindPopup(() => generatePopupHTML(point, true), { maxWidth: 320, closeButton: true });
+
+            marker.on('mouseover', function() { this.openPopup(); });
+            marker.on('click', function() {
+                if (savedPhotosMap[point.id]) {
+                    openPhotoModal(point.id);
+                } else {
+                    this.openPopup();
+                }
+            });
+
+            marker.addTo(layersByGroup[point.group]);
+            markersRegistry[point.id] = { marker, data: point, isMain: true };
+        });
+
+        // 2. Demais Postos (incluindo Vizinho do Águia II e Posto Wap) ligados à Base Principal mais próxima
+        photoLocations.forEach(photo => {
+            const iconHtml = `
+                <div class="w-7 h-7 rounded-full border-2 border-white text-white flex items-center justify-center shadow-lg transform hover:scale-120 transition" style="background-color: ${photo.color};">
+                    <i class="fa-solid fa-camera text-[11px]"></i>
+                </div>
+            `;
+
+            const customIcon = L.divIcon({
+                html: iconHtml,
+                className: 'custom-div-icon',
+                iconSize: [28, 28],
+                iconAnchor: [14, 14],
+                popupAnchor: [0, -14]
+            });
+
+            const marker = L.marker([photo.lat, photo.lng], { icon: customIcon });
+            marker.bindPopup(() => generatePopupHTML(photo, false), { maxWidth: 320, closeButton: true });
+
+            marker.on('mouseover', function() { this.openPopup(); });
+            marker.on('click', function() {
+                if (savedPhotosMap[photo.id]) {
+                    openPhotoModal(photo.id);
+                } else {
+                    this.openPopup();
+                }
+            });
+
+            marker.addTo(layersByGroup[photo.group]);
+            markersRegistry[photo.id] = { marker, data: photo, isMain: false };
+
+            // Linha tracejada conectando ao Endereço Principal mais próximo
+            const nearestMain = mainPoints.find(m => m.id === photo.nearestMainId);
+            if (nearestMain) {
+                const line = L.polyline(
+                    [[photo.lat, photo.lng], [nearestMain.lat, nearestMain.lng]],
+                    {
+                        color: photo.color,
+                        weight: 3,
+                        opacity: 0.75,
+                        dashArray: '6, 8'
+                    }
+                ).addTo(layersByGroup[photo.group]);
+
+                line.bindTooltip(`${photo.name} → ${nearestMain.name} (${photo.distanceKm})`, {
+                    sticky: true,
+                    className: 'text-xs font-bold'
+                });
+            }
+        });
+    }
+
+    // =========================================================================
+    // 7. LISTA LATERAL AGRUPADA PELOS 4 ENDEREÇOS PRINCIPAIS
+    // =========================================================================
+    function renderSidebarList(filter = 'all') {
+        const container = document.getElementById('locations-list');
+        container.innerHTML = '';
+
+        const groupsConfig = [
+            {
+                id: 'base-aguia-1',
+                title: 'Base 1 • Posto Águia I (Saramenha, 1062)',
+                dot: 'bg-emerald-500',
+                border: 'border-emerald-200'
+            },
+            {
+                id: 'base-aguia-2',
+                title: 'Base 2 • Águia II - Allgas (Saramenha, 1632)',
+                dot: 'bg-teal-600',
+                border: 'border-teal-200'
+            },
+            {
+                id: 'base-mineiro',
+                title: 'Base 3 • Posto Mineiro (Heliópolis)',
+                dot: 'bg-blue-500',
+                border: 'border-blue-200'
+            },
+            {
+                id: 'base-verona',
+                title: 'Base 4 • Posto Verona (Anel Rodoviário)',
+                dot: 'bg-purple-500',
+                border: 'border-purple-200'
+            }
+        ];
+
+        groupsConfig.forEach(g => {
+            if (filter !== 'all' && filter !== g.id) return;
+
+            const mains = mainPoints.filter(p => p.group === g.id);
+            const photos = photoLocations
+                .filter(p => p.group === g.id)
+                .sort((a, b) => a.rawDistance - b.rawDistance);
+
+            const card = document.createElement('div');
+            card.className = `bg-white rounded-xl border ${g.border} shadow-sm overflow-hidden`;
+
+            let listItems = '';
+
+            mains.forEach(m => {
+                const thumb = savedPhotosMap[m.id];
+                listItems += `
+                    <div onclick="handleItemClick('${m.id}')" onmouseenter="previewMarker('${m.id}')" class="p-2.5 bg-amber-50/50 hover:bg-amber-100/70 cursor-pointer border-b border-slate-100 transition flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-2.5 min-w-0">
+                            ${thumb
+                                ? `<img src="${thumb}" class="w-9 h-9 rounded-lg object-cover border-2 border-amber-400 shrink-0 shadow-sm">`
+                                : `<span class="w-8 h-8 rounded-full bg-slate-900 border-2 border-amber-400 text-amber-400 flex items-center justify-center text-xs shrink-0"><i class="fa-solid fa-star"></i></span>`
+                            }
+                            <div class="min-w-0">
+                                <div class="text-xs font-black text-slate-900 truncate">${m.name}</div>
+                                <div class="text-[10px] text-slate-500 truncate">${m.address}</div>
+                            </div>
+                        </div>
+                        <span class="text-[10px] font-black bg-amber-400 text-slate-950 px-2 py-0.5 rounded shrink-0">Principal</span>
+                    </div>
+                `;
+            });
+
+            photos.forEach(p => {
+                const thumb = savedPhotosMap[p.id];
+                listItems += `
+                    <div onclick="handleItemClick('${p.id}')" onmouseenter="previewMarker('${p.id}')" class="p-2.5 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 transition flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-2.5 min-w-0">
+                            ${thumb
+                                ? `<img src="${thumb}" class="w-9 h-9 rounded-lg object-cover border border-slate-300 shrink-0 shadow-sm">`
+                                : `<span class="w-7 h-7 rounded-full text-white flex items-center justify-center text-[10px] shrink-0" style="background-color: ${p.color};"><i class="fa-solid fa-camera"></i></span>`
+                            }
+                            <div class="min-w-0">
+                                <div class="text-xs font-bold text-slate-800 truncate">${p.name}</div>
+                                <div class="text-[10px] text-slate-500 font-medium truncate">
+                                    A <strong class="text-slate-700">${p.distanceKm}</strong> de ${p.nearestMainName}
+                                </div>
+                            </div>
+                        </div>
+                        <span class="text-[10px] font-bold ${thumb ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'} px-2 py-0.5 rounded shrink-0">
+                            ${thumb ? 'Ver Foto' : p.distanceKm}
+                        </span>
+                    </div>
+                `;
+            });
+
+            card.innerHTML = `
+                <div class="px-3 py-2 bg-slate-50 border-b border-slate-200/70 flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full ${g.dot} shrink-0"></span>
+                    <h2 class="text-xs font-extrabold text-slate-800 truncate">${g.title}</h2>
+                </div>
+                <div>${listItems}</div>
+            `;
+
+            container.appendChild(card);
+        });
+    }
+
+    // =========================================================================
+    // 8. INTERATIVIDADE: CLIQUE ABRE A FOTO, HOVER MOSTRA O CARD DA FOTO
+    // =========================================================================
+    function handleItemClick(id) {
+        const entry = markersRegistry[id];
+        if (!entry) return;
+
+        if (activeFilter !== 'all' && activeFilter !== entry.data.group) {
+            filterGroup('all');
+        }
+
+        map.flyTo([entry.data.lat, entry.data.lng], 15, { duration: 0.6 });
+
+        if (savedPhotosMap[id]) {
+            openPhotoModal(id);
+        } else {
+            setTimeout(() => entry.marker.openPopup(), 300);
+        }
+
+        if (window.innerWidth < 768) {
+            toggleSidebar(false);
+        }
+    }
+
+    function previewMarker(id) {
+        const entry = markersRegistry[id];
+        if (!entry) return;
+        if (activeFilter === 'all' || activeFilter === entry.data.group) {
+            entry.marker.openPopup();
+        }
+    }
+
+    function filterGroup(group) {
+        activeFilter = group;
+
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            if (btn.dataset.group === group) {
+                btn.classList.remove('bg-white', 'text-slate-700', 'border', 'border-slate-200');
+                btn.classList.add('bg-slate-900', 'text-white', 'shadow-sm');
+            } else {
+                btn.classList.add('bg-white', 'text-slate-700', 'border', 'border-slate-200');
+                btn.classList.remove('bg-slate-900', 'text-white', 'shadow-sm');
+            }
+        });
+
+        Object.keys(layersByGroup).forEach(key => {
+            if (group === 'all' || group === key) {
+                if (!map.hasLayer(layersByGroup[key])) map.addLayer(layersByGroup[key]);
+            } else {
+                if (map.hasLayer(layersByGroup[key])) map.removeLayer(layersByGroup[key]);
+            }
+        });
+
+        const bounds = [];
+        [...mainPoints, ...photoLocations].forEach(item => {
+            if (group === 'all' || item.group === group) bounds.push([item.lat, item.lng]);
+        });
+        if (bounds.length > 0) {
+            map.fitBounds(bounds, { padding: [60, 60], maxZoom: 15 });
+        }
+
+        renderSidebarList(group);
+    }
+
+    function resetMapView() {
+        filterGroup('all');
+        map.setView(initialCenter, initialZoom);
+    }
+
+    function handlePhotoUpload(event) {
+        processUploadedFiles(event.target.files);
+        event.target.value = '';
+    }
+
+    function triggerSinglePhotoUpload() {
+        document.getElementById('single-photo-uploader').click();
+    }
+
+    async function handleSinglePhotoUpload(event) {
+        const file = event.target.files && event.target.files[0];
+        if (!file || !targetUploadPostId) return;
+
+        const dataUrl = await fileToDataURL(file);
+        await savePhotoToDB(targetUploadPostId, dataUrl, file.name);
+        renderSidebarList(activeFilter);
+        openPhotoModal(targetUploadPostId);
+
+        const entry = markersRegistry[targetUploadPostId];
+        if (entry && entry.marker.isPopupOpen()) {
+            entry.marker.setPopupContent(generatePopupHTML(entry.data, entry.isMain));
+        }
+        event.target.value = '';
+    }
+
+    function openPhotoModal(id) {
+        const entry = markersRegistry[id];
+        if (!entry) return;
+        const item = entry.data;
+        targetUploadPostId = id;
+        const realImageUrl = savedPhotosMap[id] || null;
+
+        document.getElementById('modal-badge').textContent = entry.isMain ? '★ ENDEREÇO PRINCIPAL' : `A ${item.distanceKm} DE ${item.nearestMainName.toUpperCase()}`;
+        document.getElementById('modal-title').textContent = item.name;
+        document.getElementById('modal-subtitle').textContent = item.address;
+
+        const body = document.getElementById('modal-body');
+
+        if (realImageUrl) {
+            body.innerHTML = `
+                <img src="${realImageUrl}" alt="${item.name}" class="max-h-[78vh] w-auto max-w-full rounded-xl shadow-2xl object-contain">
+            `;
+        } else {
+            const theme = item.signTheme || { bg: '#1e293b', border: '#475569', headerBg: '#0f172a', headerText: '#f8fafc', title: item.name };
+            const pricesRows = (item.prices && item.prices.length > 0)
+                ? item.prices.map(p => `
+                    <div class="flex items-center justify-between px-4 py-2.5 rounded-lg bg-black/30 border border-white/10">
+                        <span class="text-sm font-bold" style="color: ${p.color};">${p.fuel}</span>
+                        <span class="font-mono font-black text-base px-2.5 py-0.5 rounded bg-slate-950 text-white">${p.cash}</span>
+                    </div>
+                `).join('')
+                : '';
+
+            body.innerHTML = `
+                <div class="w-full max-w-md rounded-2xl overflow-hidden border-2 shadow-2xl" style="background-color: ${theme.bg}; border-color: ${theme.border};">
+                    <div class="px-4 py-3 text-sm font-black uppercase tracking-wider text-center" style="background-color: ${theme.headerBg}; color: ${theme.headerText};">
+                        ${theme.title}
+                    </div>
+                    ${pricesRows ? `<div class="p-4 space-y-2">${pricesRows}</div>` : ''}
+                    <div class="p-5 bg-slate-900 text-center space-y-3">
+                        <p class="text-xs text-slate-300">Selecione a fotografia deste posto para exibi-la aqui em tela cheia:</p>
+                        <div class="flex flex-col sm:flex-row gap-2 justify-center">
+                            <button onclick="triggerSinglePhotoUpload()" class="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition cursor-pointer">
+                                <i class="fa-solid fa-camera"></i>
+                                <span>Selecionar Foto Deste Posto</span>
+                            </button>
+                            <button onclick="document.getElementById('photo-uploader').click()" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer">
+                                <i class="fa-solid fa-images"></i>
+                                <span>Carregar Todas de Uma Vez</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        const modal = document.getElementById('photo-modal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+
+    function closePhotoModal(event) {
+        if (event && event.target !== event.currentTarget) return;
+        const modal = document.getElementById('photo-modal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+
+    function toggleSidebar(open) {
+        const sidebar = document.getElementById('sidebar');
+        const openBtn = document.getElementById('open-sidebar-btn');
+
+        if (open) {
+            sidebar.classList.remove('-translate-x-full');
+            openBtn.classList.add('hidden');
+            openBtn.classList.remove('flex');
+        } else {
+            sidebar.classList.add('-translate-x-full');
+            openBtn.classList.remove('hidden');
+            openBtn.classList.add('flex');
+        }
+        setTimeout(() => map.invalidateSize(), 310);
+    }
+
+    // Tela Cheia (Fullscreen API + Expansão Total da Janela)
+    function toggleFullScreen() {
+        const container = document.getElementById('app-container');
+        const icon = document.getElementById('fullscreen-icon');
+        const text = document.getElementById('fullscreen-text');
+
+        if (!document.fullscreenElement) {
+            if (container.requestFullscreen) {
+                container.requestFullscreen().catch(() => {
+                    const isExpanded = container.classList.toggle('window-expanded');
+                    toggleSidebar(!isExpanded);
+                    icon.className = isExpanded ? 'fa-solid fa-compress text-slate-900' : 'fa-solid fa-expand text-slate-900';
+                    text.textContent = isExpanded ? 'Restaurar Painel' : 'Tela Cheia';
+                });
+            }
+        } else {
+            document.exitFullscreen();
+        }
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+        const icon = document.getElementById('fullscreen-icon');
+        const text = document.getElementById('fullscreen-text');
+        if (document.fullscreenElement) {
+            icon.className = 'fa-solid fa-compress text-slate-900';
+            text.textContent = 'Sair da Tela Cheia';
+        } else {
+            icon.className = 'fa-solid fa-expand text-slate-900';
+            text.textContent = 'Tela Cheia';
+        }
+        setTimeout(() => map.invalidateSize(), 200);
+    });
+
+    // Drag & Drop de fotos direto sobre o mapa
+    window.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        document.getElementById('drop-overlay').classList.add('active');
+    });
+
+    window.addEventListener('dragleave', (e) => {
+        if (e.relatedTarget === null) {
+            document.getElementById('drop-overlay').classList.remove('active');
+        }
+    });
+
+    window.addEventListener('drop', (e) => {
+        e.preventDefault();
+        document.getElementById('drop-overlay').classList.remove('active');
+        if (e.dataTransfer && e.dataTransfer.files) {
+            processUploadedFiles(e.dataTransfer.files);
+        }
+    });
+
+    // Inicialização garantida
+    window.addEventListener('DOMContentLoaded', async () => {
+        await loadPhotosFromDB();
+        renderMapElements();
+        renderSidebarList('all');
+        setTimeout(() => map.invalidateSize(), 250);
+    });
+</script>
+
+</body>
+</html>
